@@ -1,0 +1,776 @@
+---
+title: "TEAM 5 EDA - Accidents Dataset"
+author: "Jayatha Chandra, Avanti Dorle, Lavina Talreja, Mansi Thanki"
+date: "04/23/2023"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    toc: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Import necessary libraries
+
+
+```{r}
+install.packages("mlbench")
+install.packages("rlang")
+install.packages("caret")
+install.packages('scales')
+install.packages('patchwork')
+install.packages('assertive')
+install.packages('ggplotify')
+install.packages("corrplot")
+install.packages('testthat')
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(readr)
+library(tidyverse)
+library(RSQLite)
+library(tidyr)
+library(stringr)
+library(modelr)
+library(testthat)
+library(assertive)
+library(lubridate)
+library(corrplot)
+library(reshape2)
+
+```
+
+Import clean data that we generated from Python notebook after preprocessing.
+
+```{r}
+df <- read.csv('clean_data.csv')
+```
+
+
+```{r}
+as.tibble(df)
+sum(is.na(df))
+```
+
+
+```{r}
+length(unique(df$City))
+```
+
+# Exploratory Data Analysis
+
+## Location based analysis
+
+### Top 10 cities with highest number of accidents
+
+```{r}
+top10_city <- df %>%
+  group_by(City) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count)) %>%
+  head(10)
+
+as.tibble(top10_city)
+```
+
+
+```{r}
+ggplot(top10_city, aes(x=City, y=count)) +
+  geom_bar(stat = "identity", fill = "#63C5Da") + theme_minimal() +
+  labs(title="Cities with the highest number of accidents",
+       x="City", y="Total Accidents")
+```
+
+ We can observe that the Miami has highest number of accidents whereas Minneapolis has the lowest number of accidents. This can be due to the population and number of people taking vacations in Miami.
+
+
+### Top 10 states with highest number of accidents
+
+```{r}
+top10_states <- df %>%
+  group_by(State) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count)) %>%
+  head(10)
+
+as.tibble(top10_states)
+```
+
+
+```{r}
+ggplot(top10_states, aes(x=State, y=count)) +
+  geom_bar(stat = "identity", fill = "#63C5Da") + theme_minimal() +
+  labs(title="States with the highest number of accidents",
+       x="State", y="Total Accidents")
+```
+ We can observe that the CA has highest number of accidents whereas SC has the lowest number of accidents. This can be due to the population and number of people taking vacations to CA.
+
+### Timezone based accidents
+
+```{r}
+
+# Bar Plot showing number of accidents that occured in different time zones
+library(ggplot2)
+library(ggplotify)
+
+
+timezone_df <- df %>%
+  count(Timezone) %>%
+  rename(Timezone = "Timezone", Cases = "n")
+
+
+# create a bar plot with the specified dimensions and resolution
+fig <- ggplot(data = timezone_df, aes(x = Timezone, y = Cases)) + 
+  geom_bar(stat = 'identity') +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.border = element_blank(), axis.line = element_line(colour = 'black'),
+        legend.position = 'bottom', legend.title = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+
+# add labels to the bars
+total <- nrow(df)
+fig + geom_text(aes(label = paste0(round(Cases/total * 100), '%')), 
+                position = position_stack(vjust = 0.5), size = 3, fontface = 'bold', color = 'black') +
+  labs(title = '\nPercentage of Accident Cases for \ndifferent Timezone in US (2016-2020)\n',
+       x = '\nTimezones\n', y = '\nAccident Cases\n') +
+  theme(plot.title = element_text(size = 20, face = 'bold'),
+        axis.title.x = element_text(size = 15))
+
+```
+
+ Eastern time zone region in the US has the highest no. of road accident cases (43%) in past  years. Mountain time zone region in the US has the lowest no. of road accident cases (6%) in past years.
+
+## Weather based analysis
+
+### Severity of accidents based on Weather conditions
+
+```{r}
+# Summarize the number of accidents by weather condition
+accidents_weather <- df %>%
+  mutate( Severity = case_when(
+           `Severity` == 1 ~ "Low",
+           `Severity` == 2 ~ "Moderate",
+           `Severity` == 3 ~ "High",
+           `Severity` == 4 ~ "Very High",
+           TRUE ~ "Unknown"
+         )) %>%
+  drop_na() %>%
+  group_by(Weather_Condition, Severity) %>%
+  summarize(num_accidents = n()) %>%
+  arrange(desc(num_accidents))
+
+# Create a bar chart of the number of accidents by weather condition
+ggplot(accidents_weather, aes(x = reorder(Weather_Condition, -num_accidents),
+                              y = num_accidents, fill=Severity)) +
+  geom_bar(stat = "identity") +
+  xlab("Weather Condition") +
+  ylab("Number of Accidents") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("Number of Accidents by Weather Condition")+
+  scale_y_continuous(labels = scales::label_number_si())
+
+
+```
+ We can observe the clear weather condition mostly shows moderate level severity in most cases. The Cloudy weather does show some high and very high sever accidents.
+
+
+### Severity of accidents based on Precipitation, Wind speed, Temperature, Pressure
+
+```{r}
+library(patchwork)
+
+# plot 1: For Precipitation
+
+plot1 <- df %>%
+  mutate(PrecipitationRange = cut(Precipitation, breaks = seq(0, 1, 0.1), 
+                                  right = TRUE),
+         Severity = case_when(
+           `Severity` == 1 ~ "Low",
+           `Severity` == 2 ~ "Moderate",
+           `Severity` == 3 ~ "High",
+           `Severity` == 4 ~ "Very High",
+           TRUE ~ "Unknown"
+         )) %>%
+  drop_na() %>%
+  group_by(PrecipitationRange, Severity) %>%
+  summarise(AccidentCount = n()) %>%
+  ggplot(aes(x = PrecipitationRange, y = AccidentCount, fill = Severity)) +
+  labs(title = "Precipitation, Severity, and Accidents",
+       x = "Precipitation Range (in inches)",
+       y = "Number of Accidents") +
+  geom_col() +
+  scale_y_continuous(labels = scales::label_number_si()) +
+  theme(axis.text.x = element_text(angle = 90))
+
+
+# plot 2: For Pressure
+plot2 <- df %>%
+  mutate(PressureRange = cut(Pressure, breaks = seq(0, 40, 2), right = TRUE),
+         Severity = case_when(
+           `Severity` == 1 ~ "Low",
+           `Severity` == 2 ~ "Moderate",
+           `Severity` == 3 ~ "High",
+           `Severity` == 4 ~ "Very High",
+           TRUE ~ "Unknown"
+         )) %>%
+  drop_na() %>%
+  group_by(PressureRange, Severity) %>%
+  summarise(AccidentCount = n()) %>%
+  ggplot(aes(x = PressureRange, y = AccidentCount, fill = Severity)) +
+  labs(title = "Pressure, Severity, and Accidents",
+       x = "Pressure Range (in hPa)",
+       y = "Number of Accidents") +
+  geom_col() +
+  scale_y_continuous(labels = scales::label_number_si()) +
+  theme(axis.text.x = element_text(angle = 90))
+
+# plot 3: For Windspeed
+
+plot3 <- df_windspeed <- df %>%
+  mutate(WindSpeedRange = cut(Wind_Speed, breaks = seq(0, 50, 2), right = FALSE),
+   Severity = case_when(
+           `Severity` == 1 ~ "Low",
+           `Severity` == 2 ~ "Moderate",
+           `Severity` == 3 ~ "High",
+           `Severity` == 4 ~ "Very High",
+           TRUE ~ "Unknown"
+         )) %>%
+  drop_na() %>%
+  group_by(WindSpeedRange,Severity) %>%
+  summarise(AccidentCount = n()) %>%
+  ggplot(data = ., aes(x = WindSpeedRange, y = AccidentCount, fill=Severity)) +
+  labs(title = "Wind Speed, Severity and Accidents",
+       x = "Wind Speed Range (mph)",
+       y = "Number of Accidents") +
+  geom_col() +
+  scale_y_continuous(labels = scales::label_number_si())+
+  theme(axis.text.x = element_text(angle = 90))
+
+
+# plot 4: For Temperature
+plot4 <- df %>%
+  mutate(TempRange = cut(Temperature.F., breaks = seq(-50, 110, 10), 
+                         right = TRUE),
+         Severity = case_when(
+           `Severity` == 1 ~ "Low",
+           `Severity` == 2 ~ "Moderate",
+           `Severity` == 3 ~ "High",
+           `Severity` == 4 ~ "Very High",
+           TRUE ~ "Unknown"
+         )) %>%
+  drop_na() %>%
+  group_by(TempRange, Severity) %>%
+  summarise(AccidentCount = n()) %>%
+  ggplot(aes(x = TempRange, y = AccidentCount, fill = Severity)) +
+  labs(title = "Temperature, Severity, and Accidents",
+       x = "Temperature Range (in F)",
+       y = "Number of Accidents") +
+  geom_col() +
+  scale_y_continuous(labels = scales::label_number_si()) +
+  theme(axis.text.x = element_text(angle = 90))
+
+
+#combine plots
+plot1 + plot2 + plot3 + plot4
+```
+
+ We can observe there are more accidents when the precipitation is low, when the pressure is around 28-30 hPa, when the wind speed is around 4-8 mph and when the temperature is between 40 to 90 F. These are mostly normal conditions hence it shows that accidents occure in normal conditions.
+
+```{r}
+library(patchwork)
+
+# Plot 5
+plot5 <- df %>%
+  mutate(WindchillRange = cut(Wind_Chill.F., breaks = seq(-90,200, 20), 
+                              right = FALSE),
+         Severity = case_when(
+           `Severity` == 1 ~ "Low",
+           `Severity` == 2 ~ "Moderate",
+           `Severity` == 3 ~ "High",
+           `Severity` == 4 ~ "Very High",
+           TRUE ~ "Unknown"
+         )) %>%
+  drop_na() %>%
+  group_by(WindchillRange, Severity) %>%
+  summarise(AccidentCount = n()) %>%
+  ggplot(aes(x = WindchillRange, y = AccidentCount, fill = Severity)) +
+  labs(title = "Relationship between Windchill, 
+       Severity, and Number of Accidents",
+       x = "Windchill Range (in F)",
+       y = "Number of Accidents") +
+  geom_col(position = "stack") +
+  scale_y_continuous(labels = scales::label_number_si())+
+  theme(axis.text.x = element_text(angle = 90))
+
+plot6 <- df %>%
+  mutate(TempRange = cut(Temperature.F., breaks = seq(-50, 110, 10), 
+                         right = TRUE),
+         Severity = case_when(
+           `Severity` == 1 ~ "Low",
+           `Severity` == 2 ~ "Moderate",
+           `Severity` == 3 ~ "High",
+           `Severity` == 4 ~ "Very High",
+           TRUE ~ "Unknown"
+         )) %>%
+  drop_na() %>%
+  group_by(TempRange, Severity) %>%
+  summarise(AccidentCount = n()) %>%
+  ggplot(aes(x = TempRange, y = AccidentCount, fill = Severity)) +
+  labs(title = "Relationship between Temperature, Severity, 
+       and Number of Accidents",
+       x = "Temperature Range (in F)",
+       y = "Number of Accidents") +
+  geom_col() +
+  scale_y_continuous(labels = scales::label_number_si()) +
+  theme(axis.text.x = element_text(angle = 90))
+
+# combine plots
+plot5 + plot6 + plot_layout(ncol = 1, nrow=2)
+
+```
+
+## Time based analysis
+
+```{r}
+library(lubridate)
+unique(year(df$Start_Time))
+```
+
+```{r}
+sum(is.na(df$Start_Time))
+```
+
+### Accidents based on time of the day
+
+```{r}
+# What time of day most of the accidents occur?
+
+library(ggplot2)
+library(dplyr)
+
+# Converting the Start_Time column to a datetime format
+df$Start_Time <- as.POSIXct(df$Start_Time, format="%Y-%m-%d %H:%M:%S", tz="GMT")
+
+# Counting the number of accidents per hour of the day
+hour_count <- df %>% 
+             mutate(hour = format(as.POSIXct(Start_Time), format = "%H")) %>% 
+             count(hour = hour) %>% 
+             arrange(hour)
+
+ggplot(hour_count, aes(x=hour, y=n)) +
+  geom_bar(stat="identity", fill="#69b3a2") +
+  labs(title="Time of Day Most Accidents Occur in US", x="Time (in hours)", 
+       y="Number of Accidents") +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
+
+```
+ It can be observed that most of the accidents have occured during peak working hours such as 6 AM to 8 AM and more during 3 PM to 5 PM. This can be because of the traffic accumulated on the road.
+
+### Accidents based on day of the week
+
+```{r}
+# In which day of the week most of the accident occurs?
+
+library(ggplot2)
+library(dplyr)
+
+# Counting the number of accidents per weekday
+weekday_count <- df %>%
+                 mutate(weekday = weekdays(as.Date(Start_Time))) %>%
+                 count(weekday, sort = TRUE)
+
+ggplot(weekday_count, aes(x = weekday, y = n, fill=weekday)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Number of Accidents on Each Weekday in the US",
+       x = "Day", y = "No. of Accidents") +
+  scale_y_continuous(labels = scales::comma) + 
+ theme_minimal() 
+
+```
+
+ It is evident that most of the accidents occur during the Friday and other week days compared to weekends. This can be because of the lesser traffic during the weekends.
+
+### Accidents based on month of the year
+
+```{r}
+# In which month most of the accident occurs?
+
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+
+# Counting the number of accidents per month
+month_count <- df %>%
+               mutate(month = month(Start_Time, label = TRUE)) %>%
+               count(month, sort = TRUE)
+
+ggplot(month_count, aes(x = month, y = n)) +
+  geom_bar(stat = "identity", fill = "#F38079") +
+  labs(title = "Number of Accidents Every Month in the US",
+       x = "Month", y = "Number of Accidents") +
+  scale_y_continuous(labels = scales::comma) + 
+  theme_minimal()
+```
+ It is clearly seen that as the year comes to an end, there is an increase in the number of accidents. This can be because of the holiday season as many tourists visit many crowded places that can cause accidents.
+
+
+### Accidents based on year
+
+```{r}
+# In which year most of the accident occurs?
+
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+
+# Counting the number of accidents per year
+year_count <- df %>%
+              mutate(year = year(Start_Time)) %>%
+              count(year, sort = TRUE)
+
+ggplot(year_count, aes(x = year, y = n)) +
+  geom_bar(stat = "identity", fill = "gray") +
+  geom_line(aes(x = year, y = n), color = "blue") +
+  labs(title = "Number of Accidents Each Year (2016-2021) in the US",
+       x = "Year", y = "Number of Accidents") +
+   scale_y_continuous(labels = scales::comma) + 
+  theme_minimal() 
+```
+
+ There is a significant increase in the number of accidents in 2021 compared to the past in 2016. This shows that the accident is a huge problem and continues to grow as the years progress.
+
+## Severity analysis
+
+
+```{r}
+df$Start_Time <- as_datetime(df$Start_Time)
+df$End_Time <- as_datetime(df$End_Time)
+df$Accident_duration <- round(abs((df$Start_Time-df$End_Time)/60))
+df$Year <- as.numeric(format(df$Start_Time,format="%Y"))
+df$month <- as.numeric(format(df$Start_Time,format="%m"))
+df$date <- as.numeric(format(df$Start_Time,format="%d"))
+str(df)
+as.tibble(df)
+
+```
+
+```{r}
+library(tidyr)
+df %>% 
+  group_by(Year, Severity) %>% 
+  summarise(count = n()) %>% 
+  pivot_wider(names_from = Severity, values_from = count)
+```
+
+### Percentage of accidents by severity
+
+```{r}
+# create a stacked bar plot to show severity through the years
+df %>% 
+  group_by(Year, Severity) %>% 
+  summarise(n = n()) %>% 
+  group_by(Year) %>% 
+  mutate(pct = n / sum(n)) %>% 
+  ggplot(aes(x = Year, y = pct, fill = Severity)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(title = "Percentage of Accidents by Severity (2016-2020)",
+       x = "Year", y = "Percentage") +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.position = "bottom")
+```
+ There are more number of low to moderate severity accidents in 2021 where as there were more sever accidents in the past.
+
+
+### Effect of wind speed on the severity
+
+```{r warning=FALSE}
+#Box Plot showing the effect of wind speed on severity of accidents
+df$Severity <- as.factor(df$Severity)
+
+ggplot(df, aes(x=Severity, y=Wind_Speed, fill=Severity)) +
+  geom_boxplot() +
+  scale_fill_manual(values=c("#F8766D", "#A3A500", "#00BA38", "#00BFC4")) +
+  ylim(0, 100) +
+  labs(x = "Severity", y = "Wind Speed (mph)") +
+  ggtitle('Effect of Wind Speed on the severity of accidents')+
+  theme_minimal() +
+  theme(legend.position = "none", axis.line = element_line(size = 1), 
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 14))
+
+```
+
+ There are more number of high (3) severity accidents as the wind speed increases. There are less pf a moderate severity accidents. There were some outliers found in this dataframe.
+
+### Effect of temperature on Severity
+
+```{r warning=FALSE}
+#Box Plot showing the effect of temperature on severity of accidents
+df$Severity <- as.factor(df$Severity)
+
+ggplot(df, aes(x=Severity, y=Temperature.F., fill=Severity)) +
+  geom_boxplot() +
+  scale_fill_manual(values=c("#F8766D", "#A3A500", "#00BA38", "#00BFC4")) +
+  ylim(0, 200) +
+  labs(x = "Severity", y = "Temperature(F)") +
+  ggtitle('Effect of Temperature on the severity of accidents')+
+  theme_minimal() +
+  theme(legend.position = "none", axis.line = element_line(size = 1), 
+        axis.text = element_text(size = 12), 
+        axis.title = element_text(size = 14))
+```
+
+
+ We can see that there are almost no difference in median temperature in Severity 2 and 3, while lower medium temperature in severity 4, which might indicate that lower temperature might result to more severe accidents. Whereas median temperature is slightly high for severity 1.
+
+
+### Effect of humidity on severity
+
+
+```{r}
+#Humidity
+ggplot(df, aes(x=Severity, y=Humidity, fill=Severity)) +
+  geom_boxplot() +
+  scale_fill_manual(values=c("#F8766D", "#A3A500", "#00BA38", "#00BFC4")) +
+  ylim(0, 100) +
+  labs(x = "Severity", y = "Humidity(%)") +
+  ggtitle('Effect of Humidity on the severity of accidents')+
+  theme_minimal() +
+  theme(legend.position = "none", axis.line = element_line(size = 1), 
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 14))
+```
+
+ We can see that higher humidity might lead to more severe accidents.
+
+### Effect of humidity on accidents
+
+
+
+```{r}
+library(ggplot2)
+
+df %>%
+  group_by(Humidity = as.factor(df$Humidity)) %>%
+  summarise(AccidentCount = n()) %>%
+  ggplot(aes(x = as.numeric(Humidity), y = AccidentCount)) +
+  labs(title = "Relationship between Humidity and Number of Accidents",
+       x = "Humidity",
+       y = "Number of Accidents") +
+  geom_point() + 
+  stat_smooth(method = "lm", se = FALSE, color = "red")
+
+```
+
+ We can observe that the majority of accidents have occurred between 40 and 100 percent humidity. Also, it is clear that incidents of higher severity tend to occur more frequently at higher humidity levels. The plot also emphasizes the significance of taking humidity into account when assessing traffic accidents and creating safety measures. 
+
+
+## Road conditions based analysis 
+
+
+### Severity based on traffic signal
+
+```{r}
+#Bar Plot showing Severity based on traffic signal
+df %>% 
+  group_by(Traffic_Signal,Severity) %>%   
+    filter(Traffic_Signal!="Data missing or out of range") %>%
+    summarize(total.count = n()) %>%
+    ggplot(aes(x=Severity, y=total.count,fill=Traffic_Signal)) +
+    geom_bar(stat="identity", position="dodge")+
+    ggtitle("Severity Proportion by Traffic_Signal Type") +
+    xlab("Accident Severity") + ylab("Accident Severity Proportion")+
+    theme(plot.title = element_text(hjust = 0.5))
+```
+
+### Accidents based on differnet road conditions
+
+```{r}
+
+plot1 <- df %>% group_by(Amenity) %>% count() %>%
+         ggplot(aes(x=Amenity, y=n)) +
+         geom_bar(stat = "identity", fill = "#63C5Da") + theme_minimal() +
+         labs(title="Accidents at Amenity", x="Did accident happen", y="Total Accidents")
+
+plot2 <- df %>% group_by(Crossing) %>% count() %>%
+         ggplot(aes(x=Crossing, y=n)) +
+         geom_bar(stat = "identity", fill = "#63C5Da") + theme_minimal() +
+         labs(title="Accidents at Crossing", x="Did accident happen", y="Total Accidents")
+
+plot3 <- df %>% group_by(Junction) %>% count() %>%
+         ggplot(aes(x=Junction, y=n)) +
+         geom_bar(stat = "identity", fill = "#63C5Da") + theme_minimal() +
+         labs(title="Accidents at Junction", x="Did accident happen", y="Total Accidents")
+
+plot4 <- df %>% group_by(Railway) %>% count() %>%
+         ggplot(aes(x=Railway, y=n)) +
+         geom_bar(stat = "identity", fill = "#63C5Da") + theme_minimal() +
+         labs(title="Accidents at Railway", x="Did accident happen", y="Total Accidents")
+
+plot5 <- df %>% group_by(Station) %>% count() %>%
+         ggplot(aes(x=Station, y=n)) +
+         geom_bar(stat = "identity", fill = "#63C5Da") + theme_minimal() +
+         labs(title="Accidents at Station", x="Did accident happen", y="Total Accidents")
+
+plot6 <- df %>% group_by(Traffic_Signal) %>% count() %>%
+         ggplot(aes(x=Traffic_Signal, y=n)) +
+         geom_bar(stat = "identity", fill = "#63C5Da") + theme_minimal() +
+         labs(title="Accidents at Signal", x="Did accident happen", y="Total Accidents")
+
+plot7 <- df %>% group_by(Stop) %>% count() %>%
+         ggplot(aes(x=Stop, y=n)) +
+         geom_bar(stat = "identity", fill = "#63C5Da") + theme_minimal() +
+         labs(title="Accidents at Stop", x="Did accident happen", y="Total Accidents")
+
+
+plot1 + plot2 + plot3 + plot4 + plot5 + plot6 + plot7
+
+```
+
+ We can observe that there are more accidents for roads where there was crossing, junction or signal.
+
+### Duration of an accident
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(scales)
+
+accident_duration_df <- df %>%
+  select(Accident_duration) %>%
+  rowid_to_column("Id")
+
+top_10_accident_duration_df <- accident_duration_df %>%
+  count(Accident_duration) %>%
+  top_n(10, wt = n) %>%
+  sample_frac(1) %>%
+  rename(Cases = n)
+
+top_10_accident_duration_df
+#plot
+fig1<- ggplot(top_10_accident_duration_df, aes(x = Accident_duration, y = Cases)) +
+  geom_col(fill = "pink") +
+  geom_line(aes(y = Cases), color = "darkblue", size = 1.5) +
+  geom_point(aes(y = Cases), color = "darkblue", size = 3) +
+  labs(
+    x="\nDuration of Accident in minutes\n",
+    y="\nAccident Cases\n",
+    title="\nMost Impacted Durations on the \nTraffic flow due to the Accidents \n"
+  )
+
+fig1
+```
+
+ Most accidents took 2 to 4 minutes to occur.
+
+
+# Data Modelling 
+
+## Data Preparation
+
+ For this step, we decided to drop all the columns that were not relevant and had categorical type.
+
+```{r}
+str(df)
+
+modeling_data <- subset(df, select = -c(ID, Description, Street, Side, City, County, State, Zipcode, Country, Timezone, Airport_Code, Weather_Timestamp, Start_Time, End_Time) )
+
+as.tibble(modeling_data)
+```
+
+ We also chose some relevant columns with categorical datat and, replaced the values with encoding numerical values.
+
+```{r}
+
+unique(modeling_data$Wind_Direction)
+unique(modeling_data$Weather_Condition)
+
+```
+
+```{r}
+
+as.tibble(modeling_data)
+modeling_data[] <- data.matrix(modeling_data)
+as.tibble(modeling_data)
+
+```
+
+
+```{r}
+length(modeling_data$Severity[modeling_data$Severity == 1 | 
+                                modeling_data$Severity == 2])
+length(modeling_data$Severity[modeling_data$Severity == 3 | 
+                                modeling_data$Severity == 4])
+```
+
+ Here we are dividing the target variable data from different values (1,2,3,4) to only 2 values (0,1) where 0 will be for values 1,2 and 1 is for values 3,4. This will help in creating a binary outcome after prediction.
+
+```{r}
+
+modeling_data$Severity[modeling_data$Severity == 1 | 
+                         modeling_data$Severity == 2] <- 0
+modeling_data$Severity[modeling_data$Severity == 3 | 
+                         modeling_data$Severity == 4] <- 1
+
+length(modeling_data$Severity[modeling_data$Severity == 0])
+length(modeling_data$Severity[modeling_data$Severity == 1])
+
+unique(modeling_data$Severity)
+```
+
+## Feature engineering correlation matrix
+
+```{r}
+library(ggplot2)
+library(reshape2)
+
+# Compute correlation matrix
+cor_matrix <- cor(modeling_data[, sapply(modeling_data, is.numeric)])
+
+# Plot heatmap of correlation matrix
+ggplot(melt(cor_matrix), aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "red",
+                      limits = c(-1, 1), na.value = "grey50") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "", y = "", fill = "Correlation")
+
+# Identify variables strongly correlated with Severity
+cor_matrix
+
+corr_with_target <- cor_matrix[, "Severity"]
+corr_with_target[order(abs(corr_with_target), decreasing = TRUE)]
+
+```
+
+ It is evident from the plot that there are almost all variables who are correlated to target variable in similar value. There are a few which are less correlated but we will check the feature importance graph later after modeling in Python to understand which variables are highly correlated to Severity.
+
+```{r}
+
+modeling_data$Severity[modeling_data$Severity == 0] <- "Low"
+modeling_data$Severity[modeling_data$Severity == 1] <- "High"
+
+write.csv(modeling_data,"modeling_data.csv", row.names = TRUE)
+```
+
+ Here we have converted the 0 and 1 to "Low" and "High" for modeling and better understanding. We have then exported the data as a csv, to import it in Python Notebook for modeling and prediction. 
+
+#### Please refer to TEAM5_Modeling.ipynb to check out modeling and prediction steps.
+
+
+
+
+
+
+
+
+
