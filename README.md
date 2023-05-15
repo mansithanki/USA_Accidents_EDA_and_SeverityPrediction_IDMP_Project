@@ -15,3 +15,6 @@ Here are some of the visualizations from the project:
 <img width="858" alt="Screen Shot 2023-05-14 at 9 20 19 PM" src="https://github.com/mansithanki/USA_Accidents_EDA_and_SeverityPrediction_IDMP_Project/assets/44176224/6aeb078b-b415-443d-a2f4-fc55fb969084">
 
 <img width="954" alt="Screen Shot 2023-05-14 at 9 19 49 PM" src="https://github.com/mansithanki/USA_Accidents_EDA_and_SeverityPrediction_IDMP_Project/assets/44176224/c36016d5-8b5e-40c0-b981-e69eccec95b4">
+
+<img width="954" alt="Screen Shot 2023-05-14 at 9 19 49 PM" src="https://github.com/mansithanki/USA_Accidents_EDA_and_SeverityPrediction_IDMP_Project/assets/44176224/e770d022-d951-4325-84cd-3610e172c16d">
+
